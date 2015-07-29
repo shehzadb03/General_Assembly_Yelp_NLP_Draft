@@ -202,11 +202,14 @@ train4_clean = train4.drop(['restaurant_id', 'business_id', 'categories', 'neigh
 
 #Get the average length of a review from train_review and test_review file
 train_text1 = train_review.groupby(['business_id'])['text'].apply(lambda x: ', '.join(x)).reset_index()
-train_length1 = train_review.groupby(['business_id']).mean().apply(lambda x: ', '.join(x)).reset_index()
-train_len_text = pd.merge(train_text1, train_length1, on='business_id', how='inner')
+test123 = train_review.groupby(['business_id']).text_length.mean()
+test123 = pd.DataFrame(test123).reset_index()
+
+train_len_text = pd.merge(train_text1, test123, on='business_id', how='inner')
+
+#combine
 
 # Text Analysis
-
 
 
 
