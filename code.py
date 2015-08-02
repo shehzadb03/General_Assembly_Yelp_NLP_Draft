@@ -202,12 +202,15 @@ train4_clean = train4.drop(['restaurant_id', 'business_id', 'categories', 'neigh
 
 #Get the average length of a review from train_review and test_review file
 train_text1 = train_review.groupby(['business_id'])['text'].apply(lambda x: ', '.join(x)).reset_index()
-test123 = train_review.groupby(['business_id']).text_length.mean()
-test123 = pd.DataFrame(test123).reset_index()
+train_text2 = train_review.groupby(['business_id']).text_length.mean()
+train_text3 = pd.DataFrame(test123).reset_index()
 
-train_len_text = pd.merge(train_text1, test123, on='business_id', how='inner')
+train_len_text = pd.merge(train_text1, train_text3, on='business_id', how='inner')
 
-#combine
+#combine text and length with other training data and clean
+train5 = pd.merge(train4, train_len_text, on='business_id', how='inner')
+train5 = train5.drop(['text_x'], axis=1)
+train5.rename(columns={'text_length': 'avg_text_length'}, inplace=True)
 
 # Text Analysis
 
@@ -228,6 +231,7 @@ train_len_text = pd.merge(train_text1, test123, on='business_id', how='inner')
 
 
 
+## Ignore Code below this when reviewing 
 
 # Group train_lables by restaurant id and sum the # of stars (violations)
 
