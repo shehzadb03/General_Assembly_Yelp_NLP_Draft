@@ -14,12 +14,18 @@ Created on Fri Jul  3 14:51:45 2015
 
 import numpy as np
 import pandas as pd
+import scipy as sp
 import json
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 from sklearn.cross_validation import train_test_split
 from sklearn import metrics
+from sklearn.cross_validation import cross_val_score
+from textblob import TextBlob, Word
+from nltk.stem.snowball import SnowballStemmer
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.ensemble import RandomForestRegressor
 
 #JSON to CSV
 
@@ -212,7 +218,134 @@ train5 = pd.merge(train4, train_len_text, on='business_id', how='inner')
 train5 = train5.drop(['text_x'], axis=1)
 train5.rename(columns={'text_length': 'avg_text_length'}, inplace=True)
 
-# Text Analysis
+## Initial (baseline) analysis, exploratory analysis, and Viz
+
+#Correlation of different variables with the number of violations
+sns.pairplot(train5, x_vars=['avg_text_length', 'review_count', 'stars'], y_vars = 'total_violations', size = 5, kind='reg')
+sns.pairplot(train5, x_vars=['avg_text_length'], y_vars = 'total_violations', size = 5, kind='reg')
+sns.pairplot(train5, x_vars=['review_count'], y_vars = 'total_violations', size = 5, kind='reg')
+sns.pairplot(train5, x_vars=['stars'], y_vars = 'total_violations', size = 5, kind='reg')
+
+train5['total_violations'].describe()
+
+sns.boxplot(train5['total_violations'],train5['stars'])
+sns.boxplot(train5['avg_text_length'],train5['stars'])
+
+sns.pairplot(train5, x_vars=['avg_text_length', 'review_count', 'stars'], y_vars = 'total_violations', size = 5, kind='reg')
+
+train5.corr()
+sns.heatmap(train5.corr())
+
+#Baseline Linear Regression Model
+
+feature_cols = ['avg_text_length', 'review_count', 'stars']
+X = train5[feature_cols]
+y = train5.total_violations
+
+# instantiate and fit
+linreg = LinearRegression()
+linreg.fit(X, y)
+
+# Check RMSE with cross-val
+print np.sqrt(-cross_val_score(linreg, X, y, cv=10, scoring='mean_squared_error')).mean()
+# 2.8510 Score
+
+
+# print the coefficients
+print linreg.intercept_
+print linreg.coef_
+zip(feature_cols, linreg.coef_)
+
+#With just 2 features = 2.85277 - got slightly worse
+feature_cols = ['review_count', 'stars']
+X = train5[feature_cols]
+linreg.fit(X, y)
+print np.sqrt(-cross_val_score(linreg, X, y, cv=10, scoring='mean_squared_error')).mean()
+
+
+## Text Analysis
+
+#Function to get sentiment for each review
+def detect_sentiment(text):
+    return TextBlob(text.decode('utf-8')).sentiment.polarity
+
+train5['sentiment'] = train5.text_y.apply(detect_sentiment)
+
+#Move to exploratory data part
+train5.boxplot(column='sentiment', by='stars')
+
+feature_cols=['review_count', 'stars', 'avg_text_length', 'sentiment', 'longitude', 'latitude']
+X=train5[feature_cols]
+print np.sqrt(-cross_val_score(linreg, X, y, cv=10, scoring='mean_squared_error')).mean()
+#2.8298 - slightly improved -- added sentiment, latitude, longitude
+
+#Dropping fields will not be used. Drop lat/long as it did not improve model much
+train6 = train5.drop(['restaurant_id', 'business_id', 'categories', 'latitude', 'longitude', 'neighborhoods', 'open', 'minor', 'major', 'severe'], axis=1)
+train6 = train6[['text_y', 'review_count', 'stars', 'total_violations', 'avg_text_length', 'sentiment']]
+train6['text_y'] = train6['text_y'].astype(str)
+print train6['text_y'].apply(lambda x: len(x))
+
+# split the new DataFrame into training and testing sets
+feature_cols=['text_y', 'review_count', 'stars', 'avg_text_length', 'sentiment']
+X=train6[feature_cols]
+y=train6.total_violations
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=1, train_size=.7)
+
+#TF-IDF for review  
+# Min_df range sets minimum # of times word appears
+# Play around with diff min_df to see how it improves accuracy - the lower the # of features, the better
+
+vect = TfidfVectorizer(stop_words='english', min_df=6)
+train_dtm = vect.fit_transform(X_train[:, 0]) 
+test_dtm = vect.transform(X_test[:, 0])
+
+# shape of other four feature columns
+X_train[:, 1:].shape
+
+# cast other feature columns to float and convert to a sparse matrix
+extra = sp.sparse.csr_matrix(X_train[:, 1:].astype(float))
+extra.shape
+
+# combine sparse matrices
+train_dtm_extra = sp.sparse.hstack((train_dtm, extra))
+train_dtm_extra.shape
+
+# repeat for testing set
+extra = sp.sparse.csr_matrix(X_test[:, 1:].astype(float))
+test_dtm_extra = sp.sparse.hstack((test_dtm, extra))
+test_dtm_extra.shape
+
+# use linear regression with all features
+linreg = LinearRegression()
+linreg.fit(train_dtm_extra, y_train)
+y_pred = linreg.predict(test_dtm_extra)
+print np.sqrt(metrics.mean_squared_error(y_test, y_pred)) 
+#2.62 with 1 min_df (83k features), # 2.69 with min_df of 6 (23k features)
+
+
+# transform sparse to dense matrix - Random forest does not accept sparse matrix
+# code example to transform sparse to dense = train_dtm_extra2 = train_dtm_extra.toarray()
+# Random Forest n_estimator = # of trees, max_features = # of features to try
+
+# Transform sparse to dense matrix for randomforests
+train_dtm_extra2 = train_dtm_extra.toarray()
+test_dtm_extra2 = test_dtm_extra.toarray()
+
+
+## Need to combine training and test data back together for random forest?
+
+# X = train_dtm_extra2 + test_dtm_extra2 
+# y = y_train + y_test
+
+
+rfreg = RandomForestRegressor(n_estimators=10, random_state=1) 
+rfreg.fit(X, y)
+
+
+
+# Cross val
+MSE_scores = cross_val_score(rfreg, X, y, cv=10, scoring='mean_squared_error')
+np.mean(np.sqrt(-MSE_scores))
 
 
 
@@ -227,35 +360,19 @@ train5.rename(columns={'text_length': 'avg_text_length'}, inplace=True)
 
 
 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
 
 
 
-
-## Ignore Code below this when reviewing 
-
-# Group train_lables by restaurant id and sum the # of stars (violations)
-
-train_data = pd.read_csv('train_labels.csv')
-
-#train_data2 doc sums # of stars by each restaurat and severity
-train_data2 = train_data.groupby('restaurant_id').sum()
-
-#Join train_lables with resaurant business data with # of stars (violations) totaled
-data2 = pd.merge(data, train_data2, left_on='restaurant_id', how='inner', right_index=True)
-
-# drop columns not needed
-
-data3 = data2.drop(['yelp_id_1', 'yelp_id_2', 'yelp_id_3', 'open', 'hours', 'type', 'id', 'state'],axis=1)
-
-# Count null values
-
-data3.isnull().sum()
-
-#Plot correlation
-
-sns.pairplot(data3)
-
-sns.heatmap(data3.corr())
+## Ignore Code below this when reviewing
 
 ## From Review data - check correlation between rating and length of review
 
@@ -281,7 +398,7 @@ data3.head(2)
 sns.pairplot(data3, x_vars=['*', '**', '***'], y_vars='review_count', size=6, aspect=0.7, kind='reg',)
 
 data3['*'].value_counts().plot(kind='bar')
-data3['*'].describe()
+
 
 # Linear Regression to predict total number of violations based on stars and review count
 
