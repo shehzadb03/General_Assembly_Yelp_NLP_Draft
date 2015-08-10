@@ -210,13 +210,21 @@ train4_clean = train4.drop(['restaurant_id', 'business_id', 'categories', 'neigh
 train_text1 = train_review.groupby(['business_id'])['text'].apply(lambda x: ', '.join(x)).reset_index()
 train_text2 = train_review.groupby(['business_id']).text_length.mean()
 train_text3 = pd.DataFrame(test123).reset_index()
-
 train_len_text = pd.merge(train_text1, train_text3, on='business_id', how='inner')
+
+test_text1 = test_review.groupby(['business_id'])['text'].apply(lambda x: ', '.join(x)).reset_index()
+test_text2 = test_review.groupby(['business_id']).text_length.mean()
+test_text3 = pd.DataFrame(test123).reset_index()
+test_len_text = pd.merge(test_text1, test_text3, on='business_id', how='inner')
 
 #combine text and length with other training data and clean
 train5 = pd.merge(train4, train_len_text, on='business_id', how='inner')
 train5 = train5.drop(['text_x'], axis=1)
 train5.rename(columns={'text_length': 'avg_text_length'}, inplace=True)
+
+test5 = pd.merge(test4, test_len_text, on='business_id', how='inner')
+test5 = test5.drop(['text_x'], axis=1)
+test5.rename(columns={'text_length': 'avg_text_length'}, inplace=True)
 
 ## Initial (baseline) analysis, exploratory analysis, and Viz
 
@@ -270,6 +278,7 @@ def detect_sentiment(text):
     return TextBlob(text.decode('utf-8')).sentiment.polarity
 
 train5['sentiment'] = train5.text_y.apply(detect_sentiment)
+test5['sentiment'] = train5.text_y.apply(detect_sentiment)
 
 #Move to exploratory data part
 train5.boxplot(column='sentiment', by='stars')
@@ -285,6 +294,11 @@ train6 = train6[['text_y', 'review_count', 'stars', 'total_violations', 'avg_tex
 train6['text_y'] = train6['text_y'].astype(str)
 print train6['text_y'].apply(lambda x: len(x))
 
+test6 = test5.drop(['restaurant_id', 'business_id', 'categories', 'latitude', 'longitude', 'neighborhoods', 'open', 'minor', 'major', 'severe'], axis=1)
+test6 = test6[['text_y', 'review_count', 'stars', 'total_violations', 'avg_text_length', 'sentiment']]
+test6['text_y'] = test6['text_y'].astype(str)
+print train6['text_y'].apply(lambda x: len(x))
+
 # split the new DataFrame into training and testing sets
 feature_cols=['text_y', 'review_count', 'stars', 'avg_text_length', 'sentiment']
 X=train6[feature_cols]
@@ -298,9 +312,6 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=1, train_
 vect = TfidfVectorizer(stop_words='english', min_df=6)
 train_dtm = vect.fit_transform(X_train[:, 0]) 
 test_dtm = vect.transform(X_test[:, 0])
-
-# shape of other four feature columns
-X_train[:, 1:].shape
 
 # cast other feature columns to float and convert to a sparse matrix
 extra = sp.sparse.csr_matrix(X_train[:, 1:].astype(float))
@@ -323,36 +334,79 @@ print np.sqrt(metrics.mean_squared_error(y_test, y_pred))
 #2.62 with 1 min_df (83k features), # 2.69 with min_df of 6 (23k features)
 
 
+# Notes:
 # transform sparse to dense matrix - Random forest does not accept sparse matrix
 # code example to transform sparse to dense = train_dtm_extra2 = train_dtm_extra.toarray()
 # Random Forest n_estimator = # of trees, max_features = # of features to try
+# Use train/text split, not cross-val
+# Ensemble diff models by taking mean
 
 # Transform sparse to dense matrix for randomforests
 train_dtm_extra2 = train_dtm_extra.toarray()
 test_dtm_extra2 = test_dtm_extra.toarray()
 
+rfreg = RandomForestRegressor(n_estimators=40, random_state=1) 
+rfreg.fit(train_dtm_extra2, y_train)
+y_pred = rfreg.predict(test_dtm_extra2)
+print np.sqrt(metrics.mean_squared_error(y_test, y_pred)) 
+# 2.61 RMSE with n_estimator = 10
+# 2.56 RMSE with n_estimator = 20
+# 2.52 RMSE with n_estimator = 40
 
-## Need to combine training and test data back together for random forest?
+# Tuning the number of max_features
+rfreg = RandomForestRegressor(n_estimators=40, max_features = 1500 ,random_state=1) 
+rfreg.fit(train_dtm_extra2, y_train)
+y_pred = rfreg.predict(test_dtm_extra2)
+print np.sqrt(metrics.mean_squared_error(y_test, y_pred)) 
+# Tried different # of max_features - 300 features was best at 2.51 RMSE
+## stick with no limit on mx features since it doesn't improve accuracy that much by setting max limit
 
-# X = train_dtm_extra2 + test_dtm_extra2 
-# y = y_train + y_test
+## Combine train & Test for cross-val
+
+vect = TfidfVectorizer(stop_words='english', min_df=6)
+X2 = vect.fit_transform(X.text_y) 
+# cast other feature columns to float and convert to a sparse matrix
+new_feature_cols = ['review_count', 'stars', 'avg_text_length', 'sentiment']
+extra2 = sp.sparse.csr_matrix(train6[new_feature_cols].astype(float))
+# combine sparse matrices
+X3 = sp.sparse.hstack((X2, extra2))
+# Transform sparse to dense matrix for randomforests
+X4 = X3.toarray()
+print np.sqrt(-cross_val_score(rfreg, X4, y, cv=10, scoring='mean_squared_error')).mean()
+## RMSE got worse - 2.61
+
+# Change test6 document to TF-IDF
+
+feature_cols=['text_y', 'review_count', 'stars', 'avg_text_length', 'sentiment']
+X_test=test6[feature_cols]
+y_test=test6.total_violations
+
+vect = TfidfVectorizer(stop_words='english', min_df=6)
+## Fit this or only transform?
+vect2 = vect.transform(X_test.text_y) 
+# cast other feature columns to float and convert to a sparse matrix
+test_feature_cols = ['review_count', 'stars', 'avg_text_length', 'sentiment']
+extra3 = sp.sparse.csr_matrix(test6[test_feature_cols].astype(float))
+# combine sparse matrices
+X5 = sp.sparse.hstack((vect2, extra3))
+# Transform sparse to dense matrix for randomforests
+X6 = X5.toarray()
+
+### Make prediction on test data based on the model
+
+X_train = train6[feature_cols]
+# Train the model on all training data
+rfreg.fit(X4, y)
+linreg.fit(X4, y)
+# Make prediction on test data separated by date
+rfreg_predic_violations = rfreg.predict(X6)
+linreg_predic_violations = linreg.predict(X6)
 
 
-rfreg = RandomForestRegressor(n_estimators=10, random_state=1) 
-rfreg.fit(X, y)
+## Addition exploratory for looking at mos frequent appearing terms by sentiment
 
 
-
-# Cross val
-MSE_scores = cross_val_score(rfreg, X, y, cv=10, scoring='mean_squared_error')
-np.mean(np.sqrt(-MSE_scores))
-
-
-
-
-
-
-
+## Use all data as training and check on the test file separated by date
 
 
 
