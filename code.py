@@ -403,7 +403,7 @@ rfreg_predic_violations = rfreg.predict(X6)
 linreg_predic_violations = linreg.predict(X6)
 
 
-## Addition exploratory for looking at mos frequent appearing terms by sentiment
+## Addition exploratory for looking at most frequent appearing terms by sentiment
 
 
 ## Use all data as training and check on the test file separated by date
