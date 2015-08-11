@@ -403,10 +403,64 @@ rfreg_predic_violations = rfreg.predict(X6)
 linreg_predic_violations = linreg.predict(X6)
 
 
+## Use NB to predict probability by stars as the y variable and adding those features to the model
+
+
+train6 = train6.drop('text', axis=1)
+
+## Combine all the data and do cross-val since date is not an issue
+'''all_data = train6.append(test6)
+
+feature_cols=['review_count', 'stars', 'avg_text_length', 'sentiment']
+
+vect = TfidfVectorizer(stop_words='english', min_df=6)
+dtm = vect.fit_transform(all_data.text_y) 
+
+# cast other feature columns to float and convert to a sparse matrix
+extra = sp.sparse.csr_matrix(all_data[feature_cols].astype(float))
+
+# combine sparse matrices
+dtm_extra = sp.sparse.hstack((dtm, extra))
+#Conver to array
+dtm_extra_array = dtm_extra.toarray()
+
+X=dtm_extra_array
+y=all_data.total_violations
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=1, train_size=.7)
+
+rfreg = RandomForestRegressor(n_estimators=40, max_features = 1500 ,random_state=1) 
+rfreg.fit(X_train, y_train)
+y_pred = rfreg.predict(X_test)
+print np.sqrt(metrics.mean_squared_error(y_test, y_pred)) 
+print np.sqrt(-cross_val_score(rfreg, X, y, cv=10, scoring='mean_squared_error')).mean()'''
+### Discard "all data" file as it did not improve score
+
+train6['stars2']=[for
+
+import math
+train6['stars2']=[round(train6.stars) for row in train6.stars]
+
+for row in train6.stars:
+    stars2.append(float(row))
+stars3 = round(stars2)
+    
+    
+    
+X_train, X_test, y_train, y_test = train_test_split(train6.text_y, train6.stars, random_state=1)
+train_dtm = vect.fit_transform(X_train)
+test_dtm = vect.transform(X_test)
+nb.fit(train_dtm, y_train)
+y_pred_class = nb.predict(test_dtm)
+print metrics.accuracy_score(y_test, y_pred_class)
+print metrics.confusion_matrix(y_test, y_pred_class)
+
+## Get feature importance
+## Try different n_grams
+## Try Gradient Boosting
+
 ## Addition exploratory for looking at most frequent appearing terms by sentiment
 
 
-## Use all data as training and check on the test file separated by date
 
 
 
